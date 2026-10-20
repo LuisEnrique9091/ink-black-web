@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { 
@@ -14,7 +13,9 @@ import {
   LogOut,
   LayoutDashboard,
   ArrowUpRight,
-  BarChart3
+  BarChart3,
+  CheckCircle2,
+  XCircle
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -23,7 +24,7 @@ export default function Dashboard() {
   const [cargando, setCargando] = useState(true);
   const router = useRouter();
 
-  // Lógica para determinar el estado de la cita (Tiempo real)
+  // Lógica para determinar el estado de tiempo de la cita
   const getEstadoCita = (horaCita) => {
     if (!horaCita) return 'pendiente';
     const ahora = new Date();
@@ -42,51 +43,17 @@ export default function Dashboard() {
   useEffect(() => {
     async function inicializarDashboard() {
       try {
-        const { data: { session }, error: authError } = await supabase.auth.getSession();
-        if (authError || !session) {
-          router.push('/login');
-          return;
-        }
-
-        // 1. CARGAR ALERTAS (STOCK + CADUCIDAD)
-        const { data: productos, error: prodError } = await supabase
-          .from('productos')
-          .select('*');
+        // TODO: Aquí irá la lógica para cargar datos desde MongoDB
+        // Por ahora, simulamos que ya cargó para quitar el "Cargando..."
+        console.log("Dashboard inicializado correctamente (sin Supabase)");
         
-        if (prodError) throw prodError;
-        
-        if (productos) {
-          const hoy = new Date();
-          const criticos = productos.filter(p => {
-            // Revisar Stock bajo o agotado
-            const stockCritico = p.stock_actual <= p.stock_minimo;
-            
-            // Revisar Caducidad (15 días de margen)
-            let porCaducar = false;
-            if (p.fecha_caducidad) {
-              const fechaVence = new Date(p.fecha_caducidad);
-              const diferenciaDias = (fechaVence - hoy) / (1000 * 60 * 60 * 24);
-              porCaducar = diferenciaDias <= 15 && diferenciaDias >= 0;
-            }
-            return stockCritico || porCaducar;
-          });
-          setAlertas(criticos);
-        }
-
-        // 2. CARGAR CITAS DE HOY
-        const hoyLocal = new Date().toLocaleDateString('sv-SE');
-        const { data: citas, error: citasError } = await supabase
-          .from('citas')
-          .select('*')
-          .eq('fecha', hoyLocal)
-          .order('hora', { ascending: true });
-
-        if (citasError) throw citasError;
-        if (citas) setCitasHoy(citas);
+        // Simulamos un pequeño retraso para que se vea el efecto de carga
+        setTimeout(() => {
+          setCargando(false);
+        }, 500);
 
       } catch (err) {
         console.error("Error en Dashboard:", err.message);
-      } finally {
         setCargando(false);
       }
     }
@@ -95,9 +62,12 @@ export default function Dashboard() {
   }, [router]);
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (!error) router.push('/login');
+    // TODO: Aquí deberías eliminar el token JWT del localStorage
+    localStorage.removeItem('token');
+    router.push('/login');
   };
+
+  const conteoCitasReales = citasHoy.filter(c => c.estado?.toLowerCase() !== 'cancelada').length;
 
   return (
     <div className="min-h-screen bg-black text-white flex overflow-hidden font-sans">
@@ -119,12 +89,11 @@ export default function Dashboard() {
           <Link href="/inventario" className="flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-900 text-zinc-500 font-bold hover:text-zinc-200 text-xs transition-all">
             <Package size={16} /> Inventario
           </Link>
-          {/* 1. REPORTES PRIMERO */}
           <Link href="/reportes" className="flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-900 text-zinc-500 font-bold hover:text-zinc-200 text-xs transition-all group">
-          <BarChart3 size={16} className="group-hover:text-red-600 transition-colors" /> 
-           Reportes
+            <BarChart3 size={16} className="group-hover:text-red-600 transition-colors" /> 
+            Reportes
           </Link>
-          </nav>
+        </nav>
 
         <button onClick={handleLogout} className="flex items-center gap-3 p-3 text-zinc-600 hover:text-red-500 font-black uppercase text-[9px] tracking-widest transition-all border-t border-zinc-900 pt-6">
           <LogOut size={14} /> Cerrar Sesión
@@ -166,7 +135,7 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           
-          {/* SECCIÓN ALERTAS (STOCK + CADUCIDAD) */}
+          {/* SECCIÓN ALERTAS */}
           <section>
             <h2 className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.4em] flex items-center gap-2 mb-4">
               <AlertCircle size={12} className="text-red-600" /> Alertas de Pánico
@@ -208,11 +177,11 @@ export default function Dashboard() {
             </div>
           </section>
 
-          {/* SECCIÓN AGENDA HOY (CON ALERTAS DE TIEMPO) */}
+          {/* SECCIÓN AGENDA HOY */}
           <section>
             <h2 className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.4em] flex justify-between items-center mb-4">
               <span className="flex items-center gap-2"><Calendar size={12} /> Agenda Hoy</span>
-              <span className="bg-zinc-900 px-2 py-0.5 rounded text-[8px] text-white italic font-black">{citasHoy.length} SESIONES</span>
+              <span className="bg-zinc-900 px-2 py-0.5 rounded text-[8px] text-white italic font-black">{conteoCitasReales} ACTIVAS</span>
             </h2>
             
             <div className="bg-zinc-900/30 border border-zinc-800 rounded-[2.5rem] overflow-hidden backdrop-blur-sm min-h-[300px] flex flex-col">
@@ -223,18 +192,38 @@ export default function Dashboard() {
               ) : citasHoy.length > 0 ? (
                 <div className="flex-1">
                   {citasHoy.map((cita) => {
-                    const estado = getEstadoCita(cita.hora);
+                    const estadoTiempo = getEstadoCita(cita.hora);
+                    const esCancelada = cita.estado?.toLowerCase() === 'cancelada';
+
                     return (
-                      <div key={cita.id} className={`p-5 flex items-center justify-between hover:bg-zinc-800/40 transition-all border-b border-zinc-800/50 last:border-0 group ${estado === 'pasada' ? 'opacity-30' : ''}`}>
+                      <div 
+                        key={cita.id} 
+                        className={`p-5 flex items-center justify-between hover:bg-zinc-800/40 transition-all border-b border-zinc-800/50 last:border-0 group 
+                          ${esCancelada ? 'opacity-30' : estadoTiempo === 'pasada' ? 'opacity-50' : ''}`}
+                      >
                         <div className="flex items-center gap-4">
                           <div className={`transition-all w-12 h-12 rounded-2xl flex flex-col items-center justify-center shadow-lg 
-                            ${estado === 'proxima' ? 'bg-red-600 animate-bounce text-white' : 'bg-zinc-800 group-hover:bg-zinc-700'}`}>
+                            ${esCancelada ? 'bg-zinc-800' : estadoTiempo === 'proxima' ? 'bg-red-600 animate-bounce text-white' : 'bg-zinc-800 group-hover:bg-zinc-700'}`}>
                             <span className="text-[10px] font-black leading-none">{cita.hora?.slice(0, 5)}</span>
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
                               <h4 className="font-black text-sm uppercase tracking-tighter group-hover:text-red-500 transition-colors text-white">{cita.cliente}</h4>
-                              {estado === 'proxima' && <span className="bg-red-600 text-[7px] font-black px-1.5 py-0.5 rounded animate-pulse text-white">¡YA LLEGA!</span>}
+                              
+                              {/* TAGS DE ESTADO */}
+                              {esCancelada ? (
+                                <span className="bg-red-600/10 text-red-500 text-[7px] font-black px-1.5 py-0.5 rounded border border-red-600/20 flex items-center gap-1">
+                                  <XCircle size={8} /> CANCELADA
+                                </span>
+                              ) : estadoTiempo === 'proxima' ? (
+                                <span className="bg-red-600 text-[7px] font-black px-1.5 py-0.5 rounded animate-pulse text-white flex items-center gap-1">
+                                  <Clock size={8} /> ¡YA LLEGA!
+                                </span>
+                              ) : (
+                                <span className="bg-green-600/10 text-green-500 text-[7px] font-black px-1.5 py-0.5 rounded border border-green-600/20 flex items-center gap-1">
+                                  <CheckCircle2 size={8} /> CONFIRMADA
+                                </span>
+                              )}
                             </div>
                             <div className="flex items-center gap-2 text-[8px] font-black uppercase tracking-widest">
                               <p className="text-zinc-500">{cita.estilo || 'Estilo Libre'}</p>

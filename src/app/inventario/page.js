@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+
 import { 
   Search, ChevronLeft, Plus, X, Save, ShoppingCart, Clock, 
   Package, LogOut, Edit3, Filter, 
@@ -53,7 +53,7 @@ export default function Inventario() {
         stock_minimo: Number(nuevoProd.stock_minimo)
       }]);
       if (error) throw error;
-      alert("¡Insumo registrado! 💉");
+      alert("¡Insumo registrado! ");
       setShowModalNuevo(false);
       setNuevoProd({ nombre: '', stock_actual: 0, stock_minimo: 5, unidad_medida: 'unidades', fecha_caducidad: '', categoria: 'Insumos' });
       fetchProductos();
