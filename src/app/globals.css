@@ -22,5 +22,11 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Evita el "flash" blanco al cargar en móvil */
+html {
+  background: #000;
+  -webkit-tap-highlight-color: transparent;
 }
