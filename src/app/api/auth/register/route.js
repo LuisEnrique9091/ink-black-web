@@ -1,67 +1,77 @@
 // src/app/api/auth/register/route.js
-import { NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
-import bcrypt from 'bcryptjs';
-import nodemailer from 'nodemailer';
+import { getCollection, COLLECTIONS } from '@/lib/db';
+import { badRequest, created, handleError } from '@/lib/http';
+import { enviarCodigoVerificacion, generarOtp, otpExpiraEn } from '@/lib/mailer';
+import { isNonEmptyString, isValidEmail, isValidPassword, normalizeEmail } from '@/lib/validators';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
-    const { email, username, password } = await request.json();
+    const body = await request.json();
+    const email = normalizeEmail(body.email);
+    const username = String(body.username || '').trim();
+    const password = String(body.password || '');
 
-    if (!email || !password || !username) {
-      return NextResponse.json({ error: 'Faltan datos' }, { status: 400 });
+    if (!isNonEmptyString(username)) return badRequest('El nombre de usuario es obligatorio');
+    if (!isValidEmail(email)) return badRequest('El correo electrónico no es válido');
+    if (!isValidPassword(password)) return badRequest('La contraseña debe tener al menos 8 caracteres');
+
+    const usersCollection = await getCollection(COLLECTIONS.usuarios);
+
+    const existente = await usersCollection.findOne({ email });
+    if (existente) {
+      if (existente.isVerified) return badRequest('El correo ya está registrado');
+      // Cuenta sin verificar: reenviamos un código nuevo en vez de bloquear el registro.
+      const otpCode = generarOtp();
+      await usersCollection.updateOne(
+        { _id: existente._id },
+        {
+          $set: {
+            username,
+            hashedPassword: await hashPassword(password),
+            otpCode,
+            otpExpiresAt: otpExpiraEn(),
+            otpAttempts: 0,
+            otpSentAt: new Date(),
+          },
+        }
+      );
+      await enviarCodigoVerificacion(email, otpCode);
+      return created({ message: 'Tu cuenta ya existía sin verificar. Te enviamos un código nuevo.' });
     }
 
-    const client = await clientPromise;
-    const db = client.db(process.env.DB_NAME);
-    const usersCollection = db.collection('Users-InkBlack'); // Ojo: tu colección se llama Users-InkBlack según la captura
-
-    // 1. Verificar si el usuario ya existe
-    const existingUser = await usersCollection.findOne({ email });
-    if (existingUser) {
-      return NextResponse.json({ error: 'El correo ya está registrado' }, { status: 400 });
-    }
-
-    // 2. Encriptar la contraseña
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // 3. Generar el código OTP
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-    // 4. Crear el usuario
-    await usersCollection.insertOne({
+    const otpCode = generarOtp();
+    const resultado = await usersCollection.insertOne({
       email,
       username,
-      hashedPassword,
+      hashedPassword: await hashPassword(password),
       isVerified: false,
       otpCode,
-      otpExpiresAt,
+      otpExpiresAt: otpExpiraEn(),
+      otpAttempts: 0,
+      otpSentAt: new Date(),
       createdAt: new Date(),
     });
 
-    // 5. Enviar el correo
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    try {
+      await enviarCodigoVerificacion(email, otpCode);
+    } catch (mailError) {
+      // Sin correo enviado la cuenta quedaría inutilizable: se revierte el registro.
+      console.error('[REGISTER] Error enviando correo:', mailError.message);
+      await usersCollection.deleteOne({ _id: resultado.insertedId });
+      return badRequest(
+        'No pudimos enviar el correo de verificación. Revisa la configuración de correo e intenta de nuevo.'
+      );
+    }
 
-    await transporter.sendMail({
-      from: `"Ink Black" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: 'Tu código de verificación - Ink Black',
-      html: `<h2>Bienvenido a Ink Black</h2>
-             <p>Tu código de verificación es: <strong>${otpCode}</strong></p>
-             <p>Este código expirará en 10 minutos.</p>`,
-    });
-
-    return NextResponse.json({ message: 'Usuario registrado. Revisa tu correo.' }, { status: 201 });
-
-  } catch (error) {
-    console.error('ERROR EN REGISTER:', error); // Esto nos dirá qué falla
-    return NextResponse.json({ error: 'Error en el servidor: ' + error.message }, { status: 500 });
+    return created({ message: 'Usuario registrado. Revisa tu correo.' });
+  } catch (err) {
+    return handleError(err, 'POST /api/auth/register');
   }
+}
+
+async function hashPassword(password) {
+  const bcrypt = (await import('bcryptjs')).default;
+  return bcrypt.hash(password, 10);
 }
